@@ -1,8 +1,8 @@
-name: Android FFmpeg module
+name: Lumation Android APK · FFmpeg + Local AI
 
 on:
   push:
-    branches: [feat/android-ffmpeg, feat/motion-layers-v0.3, feat/project-save-v0.4, feat/project-library-v0.5, feat/undo-command-v0.6]
+    branches: [feat/android-ffmpeg, feat/motion-layers-v0.3, feat/project-save-v0.4, feat/project-library-v0.5, feat/undo-command-v0.6, feat/offline-gguf-v0.7]
   workflow_dispatch:
 
 concurrency:
@@ -12,6 +12,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     permissions:
       contents: read
     steps:
@@ -20,17 +21,19 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Install Android platform
+      - name: Install Android platform and NDK
         run: |
           SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)
           test -n "$SDKMANAGER"
-          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+      - name: Fetch pinned llama.cpp source
+        run: bash scripts/setup-llama-source.sh
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
       - name: Build Android library and demo APK
-        run: gradle -p android :ffmpeg:testDebugUnitTest :app:testDebugUnitTest :ffmpeg:assembleDebug :app:assembleDebug --no-daemon
+        run: gradle -p android :ffmpeg:testDebugUnitTest :app:testDebugUnitTest :ffmpeg:assembleDebug :app:assembleDebug --no-daemon --max-workers=2
       - uses: actions/upload-artifact@v4
         with:
           name: lumation-ffmpeg-aar

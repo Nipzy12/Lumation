@@ -30,7 +30,7 @@ jobs:
         with:
           gradle-version: "8.9"
       - name: Build Android library and demo APK
-        run: gradle -p android :ffmpeg:assembleDebug :app:assembleDebug --no-daemon
+        run: gradle -p android :ffmpeg:testDebugUnitTest :ffmpeg:assembleDebug :app:assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: lumation-ffmpeg-aar

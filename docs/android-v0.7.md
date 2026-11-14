@@ -20,7 +20,7 @@ Start with [Qwen2.5-0.5B-Instruct-GGUF Q4_K_M](https://huggingface.co/Qwen/Qwen2
 
 ### How to test
 
-1. Install the v0.7 debug APK over an existing compatible signing certificate if possible. **Do not uninstall an existing app with valuable project data**, as uninstalling erases app-private project storage.
+1. Install the debug APK as **Lumation AI Lab**. The package ID is `com.lumavun.lumation.dev`, separate from the previously installed `com.lumavun.lumation`. Both can run side by side, protecting existing v0.6 app-private project data. This AI Lab package has **its own empty project library** and cannot read the old app's private files.
 2. Download the Q4_K_M GGUF separately using the browser.
 3. Open **Import GGUF**, select the downloaded `.gguf`; the model is copied to `files/ai-models/active.gguf`.
 4. Tap **Load Model** to initialize the local model in RAM. If the device is low on RAM or the model is unsupported, a failure will be shown instead of claiming AI is ready.
@@ -39,6 +39,7 @@ Local Android Studio builds require JDK 17, Android SDK 35, NDK `27.2.12479018`,
 - Local inference does not enable unrestricted arbitrary code execution. Model text is interpreted as data, and only recognized animation commands can be manually applied.
 - The selected GGUF file is untrusted data; import checks magic/size, but the actual model compatibility is determined by llama.cpp load. Use models from reputable sources.
 - This is **not** a full conversational AI agent, general scene generator, multimodal model, voice assistant or Remotion renderer. It suggests one command at a time.
+- The v0.7 debug APK deliberately uses a separate `.dev` package and launcher name `Lumation AI Lab` to avoid replacing your working v0.6 installation. It starts with separate empty app-private storage. A later release needs stable signing and an explicit project export/import migration before merging packages.
 - The debug APK is not a production release; audit native dependencies, app signing, model licensing and on-device memory/performance first.
 - GitHub build/CI passing only establishes compilation and JVM test success. **Real GGUF inference on Realme 8 Pro is not hardware-verified until tested on a real device.**
 - The app does not ship a default model and has no internet/download permission. Models must be imported via Android's document picker.

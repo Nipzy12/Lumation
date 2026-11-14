@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ContentValues
 import android.content.Intent
 import android.media.MediaMetadataRetriever
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -29,6 +30,7 @@ import java.util.Locale
 class MainActivity : Activity() {
     companion object {
         private const val REQUEST_VIDEO = 201
+        private const val REQUEST_AUDIO = 202
     }
 
     private lateinit var preview: VideoView
@@ -39,6 +41,11 @@ class MainActivity : Activity() {
     private lateinit var endLabel: TextView
     private lateinit var status: TextView
     private lateinit var importButton: Button
+    private lateinit var audioImportButton: Button
+    private lateinit var audioRemoveButton: Button
+    private lateinit var audioFileName: TextView
+    private lateinit var audioVolumeLabel: TextView
+    private lateinit var audioVolumeSeek: SeekBar
     private lateinit var playButton: Button
     private lateinit var exportButton: Button
     private lateinit var startSeek: SeekBar
@@ -48,6 +55,11 @@ class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var source: File? = null
+    private var soundtrack: File? = null
+    private var soundtrackName: String? = null
+    private var soundtrackPlayer: MediaPlayer? = null
+    private var soundtrackDurationMs = 0L
+    private var sourceHasAudio = false
     private var durationMs = 0L
     private var trimStartMs = 0L
     private var trimEndMs = 0L
@@ -65,7 +77,10 @@ class MainActivity : Activity() {
                     preview.seekTo(trimStartMs.toInt())
                     timeline.cursorMs = trimStartMs
                     playButton.text = "▶ Play"
+                    pauseSoundtrack()
                 }
+            } else if (soundtrackPlayer?.isPlaying == true) {
+                pauseSoundtrack()
             }
             handler.postDelayed(this, 200L)
         }
@@ -85,6 +100,11 @@ class MainActivity : Activity() {
         endLabel = findViewById(R.id.endLabel)
         status = findViewById(R.id.status)
         importButton = findViewById(R.id.importButton)
+        audioImportButton = findViewById(R.id.audioImportButton)
+        audioRemoveButton = findViewById(R.id.audioRemoveButton)
+        audioFileName = findViewById(R.id.audioFileName)
+        audioVolumeLabel = findViewById(R.id.audioVolumeLabel)
+        audioVolumeSeek = findViewById(R.id.audioVolumeSeek)
         playButton = findViewById(R.id.playButton)
         exportButton = findViewById(R.id.exportButton)
         startSeek = findViewById(R.id.startSeek)
@@ -93,6 +113,16 @@ class MainActivity : Activity() {
         exportProgress = findViewById(R.id.exportProgress)
 
         importButton.setOnClickListener { openGallery() }
+        audioImportButton.setOnClickListener { openAudioPicker() }
+        audioRemoveButton.setOnClickListener { clearSoundtrack() }
+        audioVolumeSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
+                audioVolumeLabel.text = "Volume musik: $value%"
+                soundtrackPlayer?.setVolume(value / 100f, value / 100f)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+        })
         playButton.setOnClickListener { togglePlayback() }
         exportButton.setOnClickListener { exportCurrentTrim() }
         preview.setOnPreparedListener { player ->
@@ -104,10 +134,12 @@ class MainActivity : Activity() {
         preview.setOnErrorListener { _, _, _ ->
             playbackReady = false
             playButton.isEnabled = false
+            pauseSoundtrack()
             status.text = "Preview tidak didukung oleh decoder HP. Ekspor FFmpeg tetap dapat dicoba."
             true
         }
         preview.setOnCompletionListener {
+            pauseSoundtrack()
             playButton.text = "▶ Play"
             timeline.cursorMs = trimStartMs
             preview.seekTo(trimStartMs.toInt())
@@ -116,6 +148,7 @@ class MainActivity : Activity() {
             if (playbackReady) {
                 preview.seekTo(ms.coerceIn(trimStartMs, trimEndMs).toInt())
                 timeLabel.text = "${clock(ms)} / ${clock(durationMs)}"
+                if (preview.isPlaying) startSoundtrackAt(ms)
             }
         }
         startSeek.setOnSeekBarChangeListener(seekListener(isStart = true))
@@ -137,6 +170,7 @@ class MainActivity : Activity() {
             updateTrim()
             if (isStart && playbackReady) {
                 preview.pause()
+                pauseSoundtrack()
                 preview.seekTo(trimStartMs.toInt())
                 playButton.text = "▶ Play"
                 timeline.cursorMs = trimStartMs
@@ -156,6 +190,15 @@ class MainActivity : Activity() {
         endLabel.text = "Selesai: ${clock(trimEndMs)}"
     }
 
+    private fun openAudioPicker() {
+        if (busy) return
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "audio/*"
+        }
+        startActivityForResult(intent, REQUEST_AUDIO)
+    }
+
     private fun openGallery() {
         if (busy) return
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -168,8 +211,9 @@ class MainActivity : Activity() {
     @Deprecated("Android Activity result callback; migrate to Activity Result API in a later release")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_VIDEO && resultCode == RESULT_OK) {
-            data?.data?.let(::importVideo)
+        if (resultCode == RESULT_OK) {
+            if (requestCode == REQUEST_VIDEO) data?.data?.let(::importVideo)
+            if (requestCode == REQUEST_AUDIO) data?.data?.let(::importAudio)
         }
     }
 
@@ -188,8 +232,12 @@ class MainActivity : Activity() {
                 if (imported.length() == 0L) throw IllegalStateException("File video kosong")
 
                 val retriever = MediaMetadataRetriever()
+                var containsAudio = false
                 val length = try {
                     retriever.setDataSource(imported.absolutePath)
+                    containsAudio = retriever.extractMetadata(
+                        MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO
+                    ).equals("yes", ignoreCase = true)
                     retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                         ?.toLongOrNull() ?: 0L
                 } finally {
@@ -201,6 +249,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     source?.takeIf { it != imported }?.delete()
                     source = imported
+                    sourceHasAudio = containsAudio
                     durationMs = length
                     trimStartMs = 0L
                     trimEndMs = length
@@ -212,6 +261,7 @@ class MainActivity : Activity() {
                     updateTrim()
                     fileName.text = label
                     timeLabel.text = "${clock(0)} / ${clock(length)}"
+                    pauseSoundtrack()
                     preview.stopPlayback()
                     playbackReady = false
                     preview.setVideoPath(imported.absolutePath)
@@ -231,6 +281,7 @@ class MainActivity : Activity() {
         if (!playbackReady || busy) return
         if (preview.isPlaying) {
             preview.pause()
+            pauseSoundtrack()
             playButton.text = "▶ Play"
         } else {
             if (preview.currentPosition.toLong() >= trimEndMs ||
@@ -238,6 +289,7 @@ class MainActivity : Activity() {
                 preview.seekTo(trimStartMs.toInt())
             }
             preview.start()
+            startSoundtrackAt(preview.currentPosition.toLong())
             playButton.text = "Ⅱ Pause"
         }
     }
@@ -250,11 +302,12 @@ class MainActivity : Activity() {
         }
         if (playbackReady && preview.isPlaying) {
             preview.pause()
+            pauseSoundtrack()
             playButton.text = "▶ Play"
         }
         setBusy(true, "Encoding MP4 offline lewat FFmpeg...")
         val temp = File(cacheDir, "lumation-${System.currentTimeMillis()}.mp4")
-        LumationFfmpeg.exportTrimmedMp4(input, temp, trimStartMs, trimEndMs) { result ->
+        val callback: (Result<File>) -> Unit = { result ->
             result.fold(
                 onSuccess = { file ->
                     Thread {
@@ -276,6 +329,101 @@ class MainActivity : Activity() {
                     runOnUiThread { setBusy(false, "Ekspor gagal: ${error.message}") }
                 }
             )
+        }
+        val music = soundtrack
+        if (music != null) {
+            LumationFfmpeg.exportWithSoundtrack(
+                input, music, temp, trimStartMs, trimEndMs,
+                sourceHasAudio, audioVolumeSeek.progress / 100f, callback
+            )
+        } else {
+            LumationFfmpeg.exportTrimmedMp4(input, temp, trimStartMs, trimEndMs, callback)
+        }
+    }
+
+
+    /** Import selected audio into private app storage and prepare local music preview. */
+    private fun importAudio(uri: Uri) {
+        if (busy) return
+        setBusy(true, "Mengimpor audio...")
+        val display = displayName(uri) ?: "soundtrack"
+        Thread {
+            var imported: File? = null
+            var player: MediaPlayer? = null
+            try {
+                val ext = display.substringAfterLast('.', "mp3")
+                    .lowercase(Locale.US).takeIf { it.matches(Regex("[a-z0-9]{1,6}")) } ?: "mp3"
+                val directory = File(filesDir, "imports").apply { mkdirs() }
+                imported = File(directory, "music-${System.currentTimeMillis()}.$ext")
+                val stream = contentResolver.openInputStream(uri)
+                    ?: throw IllegalStateException("File audio tidak dapat dibuka")
+                stream.use { src -> imported.outputStream().use { dst -> src.copyTo(dst) } }
+                if (imported.length() == 0L) throw IllegalStateException("Audio kosong")
+                player = MediaPlayer().apply {
+                    setDataSource(imported.absolutePath)
+                    isLooping = true
+                    prepare()
+                }
+                val duration = player.duration.toLong()
+                if (duration <= 0L) throw IllegalStateException("Durasi audio tidak didukung")
+                val newPlayer = player
+                val newFile = imported
+                runOnUiThread {
+                    pauseSoundtrack()
+                    soundtrackPlayer?.release()
+                    soundtrack?.takeIf { it != newFile }?.delete()
+                    soundtrack = newFile
+                    soundtrackName = display
+                    soundtrackPlayer = newPlayer
+                    soundtrackDurationMs = duration
+                    timeline.musicTrackName = display
+                    audioFileName.text = "♫ $display"
+                    val gain = audioVolumeSeek.progress / 100f
+                    newPlayer.setVolume(gain, gain)
+                    player = null
+                    imported = null
+                    setBusy(false, "Audio track ditambahkan. Musik akan diputar berulang saat preview.")
+                }
+            } catch (e: Exception) {
+                player?.release()
+                imported?.delete()
+                runOnUiThread { setBusy(false, "Gagal impor audio: ${e.message}") }
+            }
+        }.start()
+    }
+
+    private fun clearSoundtrack() {
+        if (busy) return
+        pauseSoundtrack()
+        soundtrackPlayer?.release()
+        soundtrackPlayer = null
+        soundtrack?.delete()
+        soundtrack = null
+        soundtrackName = null
+        soundtrackDurationMs = 0L
+        timeline.musicTrackName = null
+        audioFileName.text = "Audio track belum ditambahkan"
+        setBusy(false, "Audio track dihapus.")
+    }
+
+    /** Sync music position to the trimmed clip, repeating when audio is shorter. */
+    private fun startSoundtrackAt(videoTimeMs: Long) {
+        val player = soundtrackPlayer ?: return
+        if (soundtrackDurationMs <= 0L || busy) return
+        try {
+            val relative = (videoTimeMs - trimStartMs).coerceAtLeast(0L)
+            player.seekTo((relative % soundtrackDurationMs).toInt())
+            if (!player.isPlaying) player.start()
+        } catch (e: IllegalStateException) {
+            status.text = "Audio preview tidak dapat diputar: ${e.message}"
+        }
+    }
+
+    private fun pauseSoundtrack() {
+        try {
+            if (soundtrackPlayer?.isPlaying == true) soundtrackPlayer?.pause()
+        } catch (_: IllegalStateException) {
+            // Playback can already be released while the activity is closing.
         }
     }
 
@@ -315,6 +463,9 @@ class MainActivity : Activity() {
         status.text = message
         exportProgress.visibility = if (value) View.VISIBLE else View.GONE
         importButton.isEnabled = !value
+        audioImportButton.isEnabled = !value
+        audioRemoveButton.isEnabled = !value && soundtrack != null
+        audioVolumeSeek.isEnabled = !value && soundtrack != null
         playButton.isEnabled = !value && playbackReady
         exportButton.isEnabled = !value && source != null
         startSeek.isEnabled = !value
@@ -330,6 +481,9 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacks(refreshPlayback)
+        pauseSoundtrack()
+        soundtrackPlayer?.release()
+        soundtrackPlayer = null
         preview.stopPlayback()
         super.onDestroy()
     }

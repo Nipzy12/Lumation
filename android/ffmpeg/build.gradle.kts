@@ -27,4 +27,5 @@ android {
 dependencies {
     // Non-GPL maintained Android fork. Version intentionally pinned.
     implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.7")
+    testImplementation("junit:junit:4.13.2")
 }

@@ -77,6 +77,15 @@ class MotionLayerController(
                 onMessage("Image layer dihapus.")
             }
         }
+        activity.findViewById<Button>(R.id.presetSlideButton).setOnClickListener {
+            if (!busy) applyPreset("slide")
+        }
+        activity.findViewById<Button>(R.id.presetRiseButton).setOnClickListener {
+            if (!busy) applyPreset("rise")
+        }
+        activity.findViewById<Button>(R.id.presetStillButton).setOnClickListener {
+            if (!busy) applyPreset("still")
+        }
         selectText.setOnClickListener { if (!busy) changeSelection("TEXT") }
         selectImage.setOnClickListener { if (!busy) changeSelection("IMAGE") }
 
@@ -128,7 +137,6 @@ class MotionLayerController(
 
     /** Restore from a working copy of a saved project, never from the snapshot master files. */
     fun restore(snapshot: MotionProjectState) {
-        require(!busy)
         imageFile?.takeIf { it != snapshot.imageFile }?.delete()
         imageFile = snapshot.imageFile
         imageName = snapshot.imageName
@@ -273,7 +281,12 @@ class MotionLayerController(
 
     fun setBusy(value: Boolean) {
         busy = value
-        listOf(applyText, removeText, addImage, selectText, selectImage).forEach { it.isEnabled = !value }
+        listOf(
+            applyText, removeText, addImage, selectText, selectImage,
+            activity.findViewById<Button>(R.id.presetSlideButton),
+            activity.findViewById<Button>(R.id.presetRiseButton),
+            activity.findViewById<Button>(R.id.presetStillButton)
+        ).forEach { it.isEnabled = !value }
         removeImage.isEnabled = !value && imageFile != null
         textInput.isEnabled = !value
         listOf(startX, startY, endX, endY, layerScale).forEach { it.isEnabled = !value }

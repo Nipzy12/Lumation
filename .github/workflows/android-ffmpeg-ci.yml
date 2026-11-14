@@ -29,10 +29,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
-      - name: Build Android library
-        run: gradle -p android :ffmpeg:assembleDebug --no-daemon
+      - name: Build Android library and demo APK
+        run: gradle -p android :ffmpeg:assembleDebug :app:assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: lumation-ffmpeg-aar
           path: android/ffmpeg/build/outputs/aar/*.aar
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lumation-demo-apk
+          path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error

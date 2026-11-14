@@ -38,6 +38,10 @@ class MotionLayerController(
     private val endX: SeekBar = activity.findViewById(R.id.layerEndX)
     private val endY: SeekBar = activity.findViewById(R.id.layerEndY)
     private val layerScale: SeekBar = activity.findViewById(R.id.layerScale)
+    private val undoButton: Button = activity.findViewById(R.id.undoButton)
+    private val redoButton: Button = activity.findViewById(R.id.redoButton)
+    private val offlineCommandInput: EditText = activity.findViewById(R.id.offlineCommandInput)
+    private val applyCommandButton: Button = activity.findViewById(R.id.applyCommandButton)
 
     private var frameWidth = 720
     private var frameHeight = 1280
@@ -52,12 +56,14 @@ class MotionLayerController(
     private var imageScale = 100
     private var selected = "TEXT"
     private var busy = false
+    private val history = EditHistory(LayerEditState())
 
     init {
         applyText.setOnClickListener {
             if (busy) return@setOnClickListener
             textContent = textInput.text.toString().trim().take(64)
             regenerate()
+            recordEdit()
             onMessage(if (textContent.isEmpty()) "Text layer dihapus." else "Text layer aktif.")
         }
         removeText.setOnClickListener {
@@ -65,6 +71,7 @@ class MotionLayerController(
             textInput.setText("")
             textContent = ""
             regenerate()
+            recordEdit()
             onMessage("Text layer dihapus.")
         }
         addImage.setOnClickListener { if (!busy) pickImage() }
@@ -74,6 +81,8 @@ class MotionLayerController(
                 imageFile = null
                 imageName = ""
                 regenerate()
+                history.reset(editState()) // Image removal is not currently undoable.
+                refreshHistoryButtons()
                 onMessage("Image layer dihapus.")
             }
         }
@@ -85,6 +94,21 @@ class MotionLayerController(
         }
         activity.findViewById<Button>(R.id.presetStillButton).setOnClickListener {
             if (!busy) applyPreset("still")
+        }
+        undoButton.setOnClickListener {
+            if (!busy && history.canUndo) {
+                restoreEditState(history.undo())
+                onMessage("Undo: perubahan layer dikembalikan.")
+            }
+        }
+        redoButton.setOnClickListener {
+            if (!busy && history.canRedo) {
+                restoreEditState(history.redo())
+                onMessage("Redo: perubahan layer diterapkan lagi.")
+            }
+        }
+        applyCommandButton.setOnClickListener {
+            if (!busy) applyOfflineInstruction(offlineCommandInput.text.toString())
         }
         selectText.setOnClickListener { if (!busy) changeSelection("TEXT") }
         selectImage.setOnClickListener { if (!busy) changeSelection("IMAGE") }
@@ -112,13 +136,74 @@ class MotionLayerController(
                 updateLabel()
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                if (!busy) recordEdit()
+            }
         }
         listOf(startX, startY, endX, endY, layerScale).forEach {
             it.setOnSeekBarChangeListener(seekListener)
         }
         changeSelection("TEXT")
         syncPreview()
+        refreshHistoryButtons()
+    }
+
+    private fun editState() = LayerEditState(
+        text = textContent,
+        textMotion = textMotion,
+        imageMotion = imageMotion,
+        textScale = textScale,
+        imageScale = imageScale
+    )
+
+    private fun recordEdit() {
+        history.commit(editState())
+        refreshHistoryButtons()
+    }
+
+    private fun refreshHistoryButtons() {
+        undoButton.isEnabled = !busy && history.canUndo
+        redoButton.isEnabled = !busy && history.canRedo
+    }
+
+    private fun restoreEditState(state: LayerEditState) {
+        textContent = state.text
+        textInput.setText(textContent)
+        textMotion = state.textMotion
+        imageMotion = state.imageMotion
+        textScale = state.textScale
+        imageScale = state.imageScale
+        regenerate()
+        changeSelection(selected)
+        refreshHistoryButtons()
+    }
+
+    /** Parse a limited offline command, then apply the same editing operations as the UI. */
+    fun applyOfflineInstruction(prompt: String): Boolean {
+        if (busy) return false
+        val instruction = OfflineMotionCommands.parse(prompt)
+        when (instruction) {
+            is MotionInstruction.SetText -> {
+                textContent = instruction.value
+                textInput.setText(textContent)
+                regenerate()
+                recordEdit()
+            }
+            is MotionInstruction.Preset -> applyPreset(instruction.name)
+            is MotionInstruction.SetScale -> {
+                if (selected == "TEXT") textScale = instruction.percent
+                else imageScale = instruction.percent
+                regenerate()
+                changeSelection(selected)
+                recordEdit()
+            }
+            null -> {
+                onMessage("Perintah tidak dikenali. Contoh: geser kanan, naik, teks: Halo, skala 125%.")
+                return false
+            }
+        }
+        onMessage("Quick Command diterapkan secara offline.")
+        return true
     }
 
     /** Snapshot editable properties and the original image file for ProjectStore. */
@@ -152,19 +237,24 @@ class MotionLayerController(
         overlay.renderHeight = frameHeight
         regenerate()
         changeSelection(if (snapshot.selected == "IMAGE") "IMAGE" else "TEXT")
+        history.reset(editState())
+        refreshHistoryButtons()
     }
 
     fun applyPreset(kind: String) {
         if (busy) return
         val motion = when (kind) {
             "slide" -> LayerMotion(0f, 0.5f, 1f, 0.5f)
+            "slide-reverse" -> LayerMotion(1f, 0.5f, 0f, 0.5f)
             "rise" -> LayerMotion(0.5f, 1f, 0.5f, 0f)
+            "fall" -> LayerMotion(0.5f, 0f, 0.5f, 1f)
             "still" -> LayerMotion()
             else -> throw IllegalArgumentException("Unknown motion preset")
         }
         if (selected == "TEXT") textMotion = motion else imageMotion = motion
         changeSelection(selected)
         syncPreview()
+        recordEdit()
         onMessage("Preset ${kind.uppercase(Locale.US)} diterapkan ke layer $selected")
     }
 
@@ -200,6 +290,8 @@ class MotionLayerController(
         overlay.renderWidth = w
         overlay.renderHeight = h
         regenerate()
+        history.reset(editState()) // New source video: previous edits are not undoable.
+        refreshHistoryButtons()
     }
 
     fun updatePlayback(timeMs: Long, trimStartMs: Long, trimEndMs: Long) {
@@ -267,6 +359,8 @@ class MotionLayerController(
                     setBusy(false)
                     syncPreview()
                     changeSelection("IMAGE")
+                    history.reset(editState()) // Importing media invalidates prior visual undo stack.
+                    refreshHistoryButtons()
                     onMessage("Image layer siap. Atur keyframe awal dan akhir.")
                 }
             } catch (e: Exception) {
@@ -285,8 +379,11 @@ class MotionLayerController(
             applyText, removeText, addImage, selectText, selectImage,
             activity.findViewById<Button>(R.id.presetSlideButton),
             activity.findViewById<Button>(R.id.presetRiseButton),
-            activity.findViewById<Button>(R.id.presetStillButton)
+            activity.findViewById<Button>(R.id.presetStillButton),
+            applyCommandButton
         ).forEach { it.isEnabled = !value }
+        offlineCommandInput.isEnabled = !value
+        refreshHistoryButtons()
         removeImage.isEnabled = !value && imageFile != null
         textInput.isEnabled = !value
         listOf(startX, startY, endX, endY, layerScale).forEach { it.isEnabled = !value }

@@ -8,6 +8,7 @@
 - [ ] AI on-device (GGUF / llama.cpp)
 - [ ] Remotion composition adapter
 - [ ] FFmpeg Android integration build-tested on a real device
+- [x] Multi-project library, text/image layer edits, and offline quick commands (debug prototype)
 - [ ] Device-verified APK: video import, soundtrack mixing, preview, trim and MP4 export
 
 The experimental FFmpeg Android library is developed on the `feat/android-ffmpeg` branch before inclusion in the main application. It does **not** yet constitute a working APK.

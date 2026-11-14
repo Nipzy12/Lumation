@@ -354,20 +354,22 @@ class MainActivity : Activity() {
                 val ext = display.substringAfterLast('.', "mp3")
                     .lowercase(Locale.US).takeIf { it.matches(Regex("[a-z0-9]{1,6}")) } ?: "mp3"
                 val directory = File(filesDir, "imports").apply { mkdirs() }
-                imported = File(directory, "music-${System.currentTimeMillis()}.$ext")
+                val file = File(directory, "music-${System.currentTimeMillis()}.$ext")
+                imported = file
                 val stream = contentResolver.openInputStream(uri)
                     ?: throw IllegalStateException("File audio tidak dapat dibuka")
-                stream.use { src -> imported.outputStream().use { dst -> src.copyTo(dst) } }
-                if (imported.length() == 0L) throw IllegalStateException("Audio kosong")
-                player = MediaPlayer().apply {
-                    setDataSource(imported.absolutePath)
+                stream.use { src -> file.outputStream().use { dst -> src.copyTo(dst) } }
+                if (file.length() == 0L) throw IllegalStateException("Audio kosong")
+                val prepared = MediaPlayer().apply {
+                    setDataSource(file.absolutePath)
                     isLooping = true
                     prepare()
                 }
-                val duration = player.duration.toLong()
+                player = prepared
+                val duration = prepared.duration.toLong()
                 if (duration <= 0L) throw IllegalStateException("Durasi audio tidak didukung")
-                val newPlayer = player
-                val newFile = imported
+                val newPlayer = prepared
+                val newFile = file
                 runOnUiThread {
                     pauseSoundtrack()
                     soundtrackPlayer?.release()

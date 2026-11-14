@@ -2,7 +2,7 @@ name: Android FFmpeg module
 
 on:
   push:
-    branches: [feat/android-ffmpeg, feat/motion-layers-v0.3, feat/project-save-v0.4]
+    branches: [feat/android-ffmpeg, feat/motion-layers-v0.3, feat/project-save-v0.4, feat/project-library-v0.5]
   workflow_dispatch:
 
 concurrency:

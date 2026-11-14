@@ -42,6 +42,12 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            // Keep the user's installed v0.6 app and its private project data untouched.
+            // This AI lab build installs side by side with the previous debug APK.
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-ai-lab"
+        }
         release {
             isMinifyEnabled = false
         }

@@ -34,6 +34,14 @@ jobs:
           gradle-version: "8.9"
       - name: Build Android library and demo APK
         run: gradle -p android :ffmpeg:testDebugUnitTest :app:testDebugUnitTest :ffmpeg:assembleDebug :app:assembleDebug --no-daemon --max-workers=2
+      - name: Verify AI Lab package identity and native JNI
+        run: |
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          test -s "$APK"
+          "$SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F "name='com.lumavun.lumation.dev'"
+          unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/liblumation_ai.so"
+          unzip -tq "$APK" | grep -F "No errors detected"
       - uses: actions/upload-artifact@v4
         with:
           name: lumation-ffmpeg-aar

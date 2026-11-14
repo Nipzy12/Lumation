@@ -160,4 +160,64 @@ object LumationFfmpeg {
         encode("h264_mediacodec")
     }
 
+    /**
+     * Composites pre-rendered transparent PNG layers and their two position keyframes.
+     * This is the native v0.3 motion pipeline; Remotion is not integrated yet.
+     * Called with paths in app-private storage; completion occurs off the UI thread.
+     */
+    fun exportWithMotionLayers(
+        video: File,
+        soundtrack: File?,
+        layers: List<RasterLayer>,
+        output: File,
+        startMs: Long,
+        endMs: Long,
+        frameWidth: Int,
+        frameHeight: Int,
+        sourceHasAudio: Boolean,
+        musicVolume: Float,
+        onComplete: (Result<File>) -> Unit
+    ) {
+        if (!video.isFile || video.length() == 0L ||
+            (soundtrack != null && (!soundtrack.isFile || soundtrack.length() == 0L)) ||
+            layers.isEmpty() || layers.any { !it.image.isFile || it.image.length() == 0L }
+        ) {
+            onComplete(Result.failure(IllegalArgumentException("Invalid media file or missing overlay")))
+            return
+        }
+        val occupied = listOfNotNull(video, soundtrack) + layers.map { it.image }
+        if (occupied.any { it.canonicalPath == output.canonicalPath }) {
+            onComplete(Result.failure(IllegalArgumentException("Output cannot replace an input")))
+            return
+        }
+        output.parentFile?.mkdirs()
+
+        fun encode(encoder: String) {
+            val arguments = try {
+                MotionExportCommand.build(
+                    video, soundtrack, layers, output, startMs, endMs,
+                    frameWidth, frameHeight, sourceHasAudio, musicVolume, encoder
+                )
+            } catch (e: IllegalArgumentException) {
+                onComplete(Result.failure(e))
+                return
+            }
+            FFmpegKit.executeWithArgumentsAsync(arguments) { session ->
+                if (ReturnCode.isSuccess(session.returnCode) && output.isFile && output.length() > 0L) {
+                    onComplete(Result.success(output))
+                } else if (encoder == "h264_mediacodec") {
+                    output.delete()
+                    encode("mpeg4")
+                } else {
+                    output.delete()
+                    onComplete(Result.failure(IllegalStateException(
+                        "Overlay export failed after hardware/software attempts: ${session.returnCode}. " +
+                            (session.failStackTrace ?: "Inspect FFmpeg logs.")
+                    )))
+                }
+            }
+        }
+        encode("h264_mediacodec")
+    }
+
 }

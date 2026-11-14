@@ -68,6 +68,7 @@ object OverlayAssets {
     }
 
     fun textBitmap(content: String, frameWidth: Int, scalePercent: Int): Bitmap? {
+        require(frameWidth >= 64) { "Frame too small for text layer" }
         val message = content.trim().take(64)
         if (message.isEmpty()) return null
         val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -98,6 +99,7 @@ object OverlayAssets {
     }
 
     fun imageBitmap(path: String, frameWidth: Int, frameHeight: Int, scalePercent: Int): Bitmap {
+        require(frameWidth >= 16 && frameHeight >= 16) { "Frame too small for image layer" }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
         require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Gambar tidak dikenali" }
@@ -116,6 +118,7 @@ object OverlayAssets {
                 .coerceAtMost(1f).coerceAtLeast(0.01f)
             val targetW = (original.width * ratio).toInt().coerceIn(2, frameWidth - 2)
             val targetH = (original.height * ratio).toInt().coerceIn(2, frameHeight - 2)
+            if (targetW == original.width && targetH == original.height) return original.copy(Bitmap.Config.ARGB_8888, false)
             return Bitmap.createScaledBitmap(original, targetW, targetH, true)
         } finally {
             original.recycle()

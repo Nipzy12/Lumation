@@ -106,4 +106,58 @@ object LumationFfmpeg {
         runEncoder("h264_mediacodec")
     }
 
+    /**
+     * Merges one separate audio track into the trimmed video.
+     *
+     * When the source video includes sound, the soundtrack is mixed with it.
+     * For muted source videos, the soundtrack becomes the sole audio stream.
+     * The external track loops to fill the selected trim interval.
+     * Real-device encoder and playback verification is still required.
+     */
+    fun exportWithSoundtrack(
+        video: File,
+        soundtrack: File,
+        output: File,
+        startMs: Long,
+        endMs: Long,
+        sourceHasAudio: Boolean,
+        musicVolume: Float,
+        onComplete: (Result<File>) -> Unit
+    ) {
+        if (!video.isFile || !soundtrack.isFile || video.length() == 0L || soundtrack.length() == 0L) {
+            onComplete(Result.failure(IllegalArgumentException("Missing video or audio track")))
+            return
+        }
+        if (video.canonicalPath == output.canonicalPath || soundtrack.canonicalPath == output.canonicalPath) {
+            onComplete(Result.failure(IllegalArgumentException("Input and output must differ")))
+            return
+        }
+        if (startMs < 0L || endMs <= startMs || musicVolume !in 0f..1f) {
+            onComplete(Result.failure(IllegalArgumentException("Invalid trim interval or music volume")))
+            return
+        }
+        output.parentFile?.mkdirs()
+
+        fun encode(codec: String) {
+            val args = AudioMixCommand.build(
+                video, soundtrack, output, startMs, endMs, sourceHasAudio, musicVolume, codec
+            )
+            FFmpegKit.executeWithArgumentsAsync(args) { session ->
+                if (ReturnCode.isSuccess(session.returnCode) && output.isFile && output.length() > 0L) {
+                    onComplete(Result.success(output))
+                } else if (codec == "h264_mediacodec") {
+                    output.delete()
+                    encode("mpeg4")
+                } else {
+                    output.delete()
+                    onComplete(Result.failure(IllegalStateException(
+                        "Audio mix export failed, code: ${session.returnCode}. " +
+                            (session.failStackTrace ?: "Check FFmpeg logs.")
+                    )))
+                }
+            }
+        }
+        encode("h264_mediacodec")
+    }
+
 }

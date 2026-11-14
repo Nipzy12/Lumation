@@ -31,6 +31,7 @@ class MainActivity : Activity() {
     companion object {
         private const val REQUEST_VIDEO = 201
         private const val REQUEST_AUDIO = 202
+        private const val REQUEST_IMAGE = 203
     }
 
     private lateinit var preview: VideoView
@@ -51,6 +52,7 @@ class MainActivity : Activity() {
     private lateinit var startSeek: SeekBar
     private lateinit var endSeek: SeekBar
     private lateinit var timeline: TimelineView
+    private lateinit var motionController: MotionLayerController
     private lateinit var exportProgress: ProgressBar
 
     private val handler = Handler(Looper.getMainLooper())
@@ -71,11 +73,13 @@ class MainActivity : Activity() {
             if (playbackReady && preview.isPlaying) {
                 val now = preview.currentPosition.toLong().coerceAtLeast(0L)
                 timeline.cursorMs = now
+                motionController.updatePlayback(now, trimStartMs, trimEndMs)
                 timeLabel.text = "${clock(now)} / ${clock(durationMs)}"
                 if (now >= trimEndMs) {
                     preview.pause()
                     preview.seekTo(trimStartMs.toInt())
                     timeline.cursorMs = trimStartMs
+                    motionController.updatePlayback(trimStartMs, trimStartMs, trimEndMs)
                     playButton.text = "▶ Play"
                     pauseSoundtrack()
                 }
@@ -111,6 +115,11 @@ class MainActivity : Activity() {
         endSeek = findViewById(R.id.endSeek)
         timeline = findViewById(R.id.timeline)
         exportProgress = findViewById(R.id.exportProgress)
+        motionController = MotionLayerController(
+            this, findViewById(R.id.motionPreview), timeline,
+            pickImage = { openImagePicker() },
+            onMessage = { message -> status.text = message }
+        )
 
         importButton.setOnClickListener { openGallery() }
         audioImportButton.setOnClickListener { openAudioPicker() }
@@ -142,9 +151,11 @@ class MainActivity : Activity() {
             pauseSoundtrack()
             playButton.text = "▶ Play"
             timeline.cursorMs = trimStartMs
+            motionController.updatePlayback(trimStartMs, trimStartMs, trimEndMs)
             preview.seekTo(trimStartMs.toInt())
         }
         timeline.onSeek = { ms ->
+            motionController.updatePlayback(ms.coerceIn(trimStartMs, trimEndMs), trimStartMs, trimEndMs)
             if (playbackReady) {
                 preview.seekTo(ms.coerceIn(trimStartMs, trimEndMs).toInt())
                 timeLabel.text = "${clock(ms)} / ${clock(durationMs)}"
@@ -188,6 +199,18 @@ class MainActivity : Activity() {
         timeline.trimEndMs = trimEndMs
         startLabel.text = "Mulai: ${clock(trimStartMs)}"
         endLabel.text = "Selesai: ${clock(trimEndMs)}"
+        if (::motionController.isInitialized) {
+            motionController.updatePlayback(timeline.cursorMs, trimStartMs, trimEndMs)
+        }
+    }
+
+    private fun openImagePicker() {
+        if (busy) return
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "image/*"
+        }
+        startActivityForResult(intent, REQUEST_IMAGE)
     }
 
     private fun openAudioPicker() {
@@ -214,6 +237,7 @@ class MainActivity : Activity() {
         if (resultCode == RESULT_OK) {
             if (requestCode == REQUEST_VIDEO) data?.data?.let(::importVideo)
             if (requestCode == REQUEST_AUDIO) data?.data?.let(::importAudio)
+            if (requestCode == REQUEST_IMAGE) data?.data?.let(motionController::importImage)
         }
     }
 
@@ -233,11 +257,24 @@ class MainActivity : Activity() {
 
                 val retriever = MediaMetadataRetriever()
                 var containsAudio = false
+                var frameW = 720
+                var frameH = 1280
                 val length = try {
                     retriever.setDataSource(imported.absolutePath)
                     containsAudio = retriever.extractMetadata(
                         MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO
                     ).equals("yes", ignoreCase = true)
+                    frameW = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                        ?.toIntOrNull() ?: 720
+                    frameH = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                        ?.toIntOrNull() ?: 1280
+                    val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                        ?.toIntOrNull() ?: 0
+                    if (rotation % 180 != 0) {
+                        val swap = frameW
+                        frameW = frameH
+                        frameH = swap
+                    }
                     retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                         ?.toLongOrNull() ?: 0L
                 } finally {
@@ -256,6 +293,7 @@ class MainActivity : Activity() {
                     timeline.durationMs = length
                     timeline.cursorMs = 0L
                     timeline.clipName = label
+                    motionController.setFrameDimensions(frameW, frameH)
                     startSeek.progress = 0
                     endSeek.progress = 1000
                     updateTrim()
@@ -289,6 +327,7 @@ class MainActivity : Activity() {
                 preview.seekTo(trimStartMs.toInt())
             }
             preview.start()
+            motionController.updatePlayback(preview.currentPosition.toLong(), trimStartMs, trimEndMs)
             startSoundtrackAt(preview.currentPosition.toLong())
             playButton.text = "Ⅱ Pause"
         }
@@ -331,7 +370,12 @@ class MainActivity : Activity() {
             )
         }
         val music = soundtrack
-        if (music != null) {
+        if (motionController.hasLayers()) {
+            motionController.exportComposited(
+                input, music, temp, trimStartMs, trimEndMs,
+                sourceHasAudio, audioVolumeSeek.progress / 100f, callback
+            )
+        } else if (music != null) {
             LumationFfmpeg.exportWithSoundtrack(
                 input, music, temp, trimStartMs, trimEndMs,
                 sourceHasAudio, audioVolumeSeek.progress / 100f, callback
@@ -472,6 +516,7 @@ class MainActivity : Activity() {
         exportButton.isEnabled = !value && source != null
         startSeek.isEnabled = !value
         endSeek.isEnabled = !value
+        if (::motionController.isInitialized) motionController.setBusy(value)
     }
 
     private fun clock(ms: Long): String {
@@ -483,6 +528,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacks(refreshPlayback)
+        if (::motionController.isInitialized) motionController.dispose()
         pauseSoundtrack()
         soundtrackPlayer?.release()
         soundtrackPlayer = null

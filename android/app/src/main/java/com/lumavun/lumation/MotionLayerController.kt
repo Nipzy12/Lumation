@@ -77,6 +77,15 @@ class MotionLayerController(
                 onMessage("Image layer dihapus.")
             }
         }
+        activity.findViewById<Button>(R.id.presetSlideButton).setOnClickListener {
+            if (!busy) applyPreset("slide")
+        }
+        activity.findViewById<Button>(R.id.presetRiseButton).setOnClickListener {
+            if (!busy) applyPreset("rise")
+        }
+        activity.findViewById<Button>(R.id.presetStillButton).setOnClickListener {
+            if (!busy) applyPreset("still")
+        }
         selectText.setOnClickListener { if (!busy) changeSelection("TEXT") }
         selectImage.setOnClickListener { if (!busy) changeSelection("IMAGE") }
 
@@ -110,6 +119,53 @@ class MotionLayerController(
         }
         changeSelection("TEXT")
         syncPreview()
+    }
+
+    /** Snapshot editable properties and the original image file for ProjectStore. */
+    fun snapshot(): MotionProjectState = MotionProjectState(
+        text = textContent,
+        imageFile = imageFile,
+        imageName = imageName,
+        textMotion = textMotion,
+        imageMotion = imageMotion,
+        textScale = textScale,
+        imageScale = imageScale,
+        selected = selected,
+        frameWidth = frameWidth,
+        frameHeight = frameHeight
+    )
+
+    /** Restore from a working copy of a saved project, never from the snapshot master files. */
+    fun restore(snapshot: MotionProjectState) {
+        imageFile?.takeIf { it != snapshot.imageFile }?.delete()
+        imageFile = snapshot.imageFile
+        imageName = snapshot.imageName
+        textContent = snapshot.text.take(64)
+        textInput.setText(textContent)
+        textMotion = snapshot.textMotion
+        imageMotion = snapshot.imageMotion
+        textScale = snapshot.textScale.coerceIn(40, 180)
+        imageScale = snapshot.imageScale.coerceIn(40, 180)
+        frameWidth = snapshot.frameWidth
+        frameHeight = snapshot.frameHeight
+        overlay.renderWidth = frameWidth
+        overlay.renderHeight = frameHeight
+        regenerate()
+        changeSelection(if (snapshot.selected == "IMAGE") "IMAGE" else "TEXT")
+    }
+
+    fun applyPreset(kind: String) {
+        if (busy) return
+        val motion = when (kind) {
+            "slide" -> LayerMotion(0f, 0.5f, 1f, 0.5f)
+            "rise" -> LayerMotion(0.5f, 1f, 0.5f, 0f)
+            "still" -> LayerMotion()
+            else -> throw IllegalArgumentException("Unknown motion preset")
+        }
+        if (selected == "TEXT") textMotion = motion else imageMotion = motion
+        changeSelection(selected)
+        syncPreview()
+        onMessage("Preset ${kind.uppercase(Locale.US)} diterapkan ke layer $selected")
     }
 
     fun hasLayers(): Boolean = textBitmap != null || imageBitmap != null
@@ -225,7 +281,12 @@ class MotionLayerController(
 
     fun setBusy(value: Boolean) {
         busy = value
-        listOf(applyText, removeText, addImage, selectText, selectImage).forEach { it.isEnabled = !value }
+        listOf(
+            applyText, removeText, addImage, selectText, selectImage,
+            activity.findViewById<Button>(R.id.presetSlideButton),
+            activity.findViewById<Button>(R.id.presetRiseButton),
+            activity.findViewById<Button>(R.id.presetStillButton)
+        ).forEach { it.isEnabled = !value }
         removeImage.isEnabled = !value && imageFile != null
         textInput.isEnabled = !value
         listOf(startX, startY, endX, endY, layerScale).forEach { it.isEnabled = !value }

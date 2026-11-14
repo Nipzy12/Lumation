@@ -11,11 +11,11 @@ import android.view.View
 import java.util.Locale
 import kotlin.math.roundToLong
 
-/** A working single-clip video timeline and seek surface for the first APK. */
+/** Lightweight two-track timeline: trimmed video and a looping soundtrack. */
 class TimelineView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null
 ) : View(context, attrs) {
-    private val d = resources.displayMetrics.density
+    private val density = resources.displayMetrics.density
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     var durationMs: Long = 0L
         set(value) { field = value; invalidate() }
@@ -27,10 +27,12 @@ class TimelineView @JvmOverloads constructor(
         set(value) { field = value; invalidate() }
     var clipName: String = "VIDEO"
         set(value) { field = value; invalidate() }
+    var musicTrackName: String? = null
+        set(value) { field = value; invalidate() }
     var onSeek: ((Long) -> Unit)? = null
 
-    private fun px(v: Float) = v * d
-    private fun drawText(canvas: Canvas, value: String, x: Float, y: Float, size: Float, color: Int) {
+    private fun px(value: Float) = value * density
+    private fun text(canvas: Canvas, value: String, x: Float, y: Float, size: Float, color: Int) {
         paint.style = Paint.Style.FILL
         paint.color = color
         paint.textSize = px(size)
@@ -42,57 +44,86 @@ class TimelineView @JvmOverloads constructor(
         super.onDraw(canvas)
         val left = px(14f)
         val right = width.toFloat() - left
-        val trackTop = px(49f)
-        val trackBottom = px(98f)
-        val fullWidth = right - left
-        val white = Color.parseColor("#F1ECFF")
+        val span = right - left
+        val light = Color.parseColor("#F1ECFF")
         val muted = Color.parseColor("#A0A1B7")
         val accent = Color.parseColor("#9E86FF")
-        val track = Color.parseColor("#483A81")
 
-        for (i in 0..4) {
-            val x = left + fullWidth * i / 4f
-            paint.color = Color.parseColor("#414052")
+        for (tick in 0..4) {
+            val x = left + span * tick / 4f
+            paint.color = Color.parseColor("#343446")
             paint.strokeWidth = px(1f)
-            canvas.drawLine(x, px(30f), x, px(106f), paint)
-            val seconds = durationMs * i / 4000.0
-            drawText(canvas, String.format(Locale.US, "%.1fs", seconds), x.coerceAtMost(right - px(28f)), px(23f), 10f, muted)
+            canvas.drawLine(x, px(30f), x, px(166f), paint)
+            text(
+                canvas,
+                String.format(Locale.US, "%.1fs", durationMs * tick / 4000.0),
+                x.coerceAtMost(right - px(32f)), px(22f), 10f, muted
+            )
         }
 
         if (durationMs <= 0L) {
-            drawText(canvas, "Belum ada klip di timeline", left + px(8f), px(76f), 13f, muted)
+            text(canvas, "Impor video untuk membuat timeline", left, px(72f), 13f, muted)
+            text(canvas, "Track audio opsional dapat ditambahkan", left, px(125f), 11f, muted)
             return
         }
 
+        val videoTop = px(43f)
+        val videoBottom = px(96f)
+        val audioTop = px(105f)
+        val audioBottom = px(150f)
         paint.style = Paint.Style.FILL
-        paint.color = track
-        canvas.drawRoundRect(RectF(left, trackTop, right, trackBottom), px(8f), px(8f), paint)
+        paint.color = Color.parseColor("#3C335F")
+        canvas.drawRoundRect(RectF(left, videoTop, right, videoBottom), px(7f), px(7f), paint)
 
-        val startX = left + fullWidth * (trimStartMs.toFloat() / durationMs).coerceIn(0f, 1f)
-        val endX = left + fullWidth * (trimEndMs.toFloat() / durationMs).coerceIn(0f, 1f)
-        paint.color = Color.parseColor("#876BFB")
-        canvas.drawRoundRect(RectF(startX, trackTop, endX, trackBottom), px(6f), px(6f), paint)
-        drawText(canvas, "▶  VIDEO 01", startX + px(8f), trackTop + px(27f), 12f, white)
+        val selectedLeft = left + span * (trimStartMs.toFloat() / durationMs).coerceIn(0f, 1f)
+        val selectedRight = left + span * (trimEndMs.toFloat() / durationMs).coerceIn(0f, 1f)
+        paint.color = Color.parseColor("#8267EC")
+        canvas.drawRoundRect(
+            RectF(selectedLeft, videoTop, selectedRight.coerceAtLeast(selectedLeft), videoBottom),
+            px(6f), px(6f), paint
+        )
+        text(canvas, "▶  VIDEO 01", selectedLeft + px(7f), videoTop + px(30f), 12f, light)
 
-        val cursorX = left + fullWidth * (cursorMs.toFloat() / durationMs).coerceIn(0f, 1f)
+        val music = musicTrackName
+        paint.color = if (music != null) Color.parseColor("#1C7F87") else Color.parseColor("#292937")
+        canvas.drawRoundRect(RectF(left, audioTop, right, audioBottom), px(7f), px(7f), paint)
+        text(
+            canvas,
+            if (music == null) "＋ AUDIO 02  •  empty" else "♫  AUDIO 02  •  ${music.take(19)}",
+            left + px(9f), audioTop + px(26f), 11f,
+            if (music != null) light else muted
+        )
+
+        val cursorX = left + span * (cursorMs.toFloat() / durationMs).coerceIn(0f, 1f)
         paint.color = accent
         paint.strokeWidth = px(2f)
-        canvas.drawLine(cursorX, px(31f), cursorX, px(116f), paint)
+        canvas.drawLine(cursorX, px(28f), cursorX, px(162f), paint)
         paint.style = Paint.Style.FILL
-        canvas.drawCircle(cursorX, px(31f), px(5f), paint)
-        drawText(canvas, "Geser penanda untuk mengatur posisi", left, px(125f), 9f, muted)
+        canvas.drawCircle(cursorX, px(29f), px(5f), paint)
+        text(canvas, "Geser untuk seek • Trim ada di bawah", left, px(171f), 9f, muted)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (durationMs <= 0L) return false
-        if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_MOVE) {
-            val left = px(14f)
-            val fraction = ((event.x - left) / (width - 2f * left)).coerceIn(0f, 1f)
-            val target = (durationMs * fraction).roundToLong()
-            cursorMs = target
-            onSeek?.invoke(target)
-            return true
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                val left = px(14f)
+                val fraction = ((event.x - left) / (width - 2f * left)).coerceIn(0f, 1f)
+                val target = (durationMs * fraction).roundToLong()
+                cursorMs = target
+                onSeek?.invoke(target)
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                performClick()
+                return true
+            }
         }
-        return event.action == MotionEvent.ACTION_UP
+        return super.onTouchEvent(event)
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
     }
 }

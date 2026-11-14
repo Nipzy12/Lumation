@@ -1,0 +1,9 @@
+# Generated native build outputs and external pinned source checkout.
+android/third_party/
+android/.gradle/
+android/**/.cxx/
+android/**/build/
+*.apk
+*.aar
+*.gguf
+.DS_Store

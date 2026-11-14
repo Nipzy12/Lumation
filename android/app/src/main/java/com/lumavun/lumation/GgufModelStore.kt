@@ -19,9 +19,18 @@ class GgufModelStore(private val directory: File) {
 
     fun current(): File? = activeFile.takeIf {
         it.isFile && ModelValidation.validSize(it.length()) &&
-            ModelValidation.hasMagic(it.inputStream().use { input ->
-                ByteArray(4).also { input.read(it) }
-            })
+            ModelValidation.hasMagic(readMagic(it))
+    }
+
+    private fun readMagic(file: File): ByteArray = file.inputStream().use { input ->
+        val head = ByteArray(4)
+        var read = 0
+        while (read < head.size) {
+            val bytes = input.read(head, read, head.size - read)
+            if (bytes < 0) break
+            read += bytes
+        }
+        if (read == 4) head else head.copyOf(read)
     }
 
     @Throws(IOException::class)
@@ -49,7 +58,7 @@ class GgufModelStore(private val directory: File) {
             if (!ModelValidation.validSize(copied)) {
                 throw IOException("GGUF file is too small or too large")
             }
-            if (!ModelValidation.hasMagic(temp.inputStream().use { it.readNBytes(4) })) {
+            if (!ModelValidation.hasMagic(readMagic(temp))) {
                 throw IOException("Not a GGUF file (invalid magic)")
             }
             // Swapping in a new imported model is only allowed once the previous

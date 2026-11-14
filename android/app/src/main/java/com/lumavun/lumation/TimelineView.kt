@@ -11,7 +11,7 @@ import android.view.View
 import java.util.Locale
 import kotlin.math.roundToLong
 
-/** Lightweight two-track timeline: trimmed video and a looping soundtrack. */
+/** Four-lane timeline: one video, one audio, one text and one image. */
 class TimelineView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null
 ) : View(context, attrs) {
@@ -28,6 +28,10 @@ class TimelineView @JvmOverloads constructor(
     var clipName: String = "VIDEO"
         set(value) { field = value; invalidate() }
     var musicTrackName: String? = null
+        set(value) { field = value; invalidate() }
+    var textTrackName: String? = null
+        set(value) { field = value; invalidate() }
+    var imageTrackName: String? = null
         set(value) { field = value; invalidate() }
     var onSeek: ((Long) -> Unit)? = null
 
@@ -53,7 +57,7 @@ class TimelineView @JvmOverloads constructor(
             val x = left + span * tick / 4f
             paint.color = Color.parseColor("#343446")
             paint.strokeWidth = px(1f)
-            canvas.drawLine(x, px(30f), x, px(166f), paint)
+            canvas.drawLine(x, px(30f), x, px(224f), paint)
             text(
                 canvas,
                 String.format(Locale.US, "%.1fs", durationMs * tick / 4000.0),
@@ -94,13 +98,28 @@ class TimelineView @JvmOverloads constructor(
             if (music != null) light else muted
         )
 
+        val textLayer = textTrackName
+        paint.color = if (textLayer != null) Color.parseColor("#9955BC") else Color.parseColor("#292937")
+        canvas.drawRoundRect(RectF(left, px(158f), right, px(185f)), px(6f), px(6f), paint)
+        text(
+            canvas, if (textLayer == null) "+ TEXT 03  •  empty" else "T  TEXT 03  •  ${textLayer.take(22)}",
+            left + px(9f), px(176f), 10f, if (textLayer != null) light else muted
+        )
+        val imageLayer = imageTrackName
+        paint.color = if (imageLayer != null) Color.parseColor("#D88C41") else Color.parseColor("#292937")
+        canvas.drawRoundRect(RectF(left, px(191f), right, px(218f)), px(6f), px(6f), paint)
+        text(
+            canvas, if (imageLayer == null) "+ IMAGE 04  •  empty" else "▣ IMAGE 04  •  ${imageLayer.take(22)}",
+            left + px(9f), px(209f), 10f, if (imageLayer != null) light else muted
+        )
+
         val cursorX = left + span * (cursorMs.toFloat() / durationMs).coerceIn(0f, 1f)
         paint.color = accent
         paint.strokeWidth = px(2f)
-        canvas.drawLine(cursorX, px(28f), cursorX, px(162f), paint)
+        canvas.drawLine(cursorX, px(28f), cursorX, px(223f), paint)
         paint.style = Paint.Style.FILL
         canvas.drawCircle(cursorX, px(29f), px(5f), paint)
-        text(canvas, "Geser untuk seek • Trim ada di bawah", left, px(171f), 9f, muted)
+        text(canvas, "Drag playhead • Keyframes menggunakan trim", left, px(233f), 9f, muted)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

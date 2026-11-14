@@ -192,8 +192,8 @@ class MotionLayerController(
                     } else null
                 } ?: "image"
                 val directory = File(activity.filesDir, "imports").apply { mkdirs() }
-                file = File(directory, "overlay-${System.currentTimeMillis()}.png")
-                val destination = file
+                val destination = File(directory, "overlay-${System.currentTimeMillis()}.png")
+                file = destination
                 val source = activity.contentResolver.openInputStream(uri)
                     ?: throw IllegalArgumentException("Gambar tidak dapat dibaca")
                 source.use { src -> destination.outputStream().use { dst -> src.copyTo(dst) } }

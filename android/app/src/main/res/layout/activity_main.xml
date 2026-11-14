@@ -27,7 +27,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="MOTION EDITOR · v0.4"
+                android:text="MOTION EDITOR · v0.5"
                 android:textColor="@color/lumation_accent"
                 android:textSize="10sp" />
         </LinearLayout>
@@ -44,7 +44,7 @@
                 android:layout_weight="1"
                 android:enabled="false"
                 android:backgroundTint="@color/lumation_surface"
-                android:text="Save Project"
+                android:text="Save"
                 android:textAllCaps="false"
                 android:textColor="@color/lumation_text" />
             <Button
@@ -54,7 +54,52 @@
                 android:layout_marginStart="8dp"
                 android:layout_weight="1"
                 android:backgroundTint="@color/lumation_surface"
-                android:text="Open Project"
+                android:text="Projects"
+                android:textAllCaps="false"
+                android:textColor="@color/lumation_text" />
+        </LinearLayout>
+        <TextView
+            android:id="@+id/projectNameLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="6dp"
+            android:text="Project: Belum disimpan"
+            android:textColor="@color/lumation_muted"
+            android:textSize="12sp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingBottom="10dp">
+            <Button
+                android:id="@+id/newProjectButton"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:backgroundTint="@color/lumation_surface"
+                android:text="+ New"
+                android:textAllCaps="false"
+                android:textColor="@color/lumation_text" />
+            <Button
+                android:id="@+id/saveAsProjectButton"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:backgroundTint="@color/lumation_surface"
+                android:text="Save As"
+                android:enabled="false"
+                android:textAllCaps="false"
+                android:textColor="@color/lumation_text" />
+            <Button
+                android:id="@+id/deleteProjectButton"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:backgroundTint="@color/lumation_surface"
+                android:text="Delete"
+                android:enabled="false"
                 android:textAllCaps="false"
                 android:textColor="@color/lumation_text" />
         </LinearLayout>

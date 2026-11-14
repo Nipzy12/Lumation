@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "LumationAndroid"
-include(":ffmpeg")
+include(":ffmpeg", ":app")

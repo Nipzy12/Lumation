@@ -3,11 +3,11 @@ name: Android FFmpeg module
 on:
   push:
     branches: [feat/android-ffmpeg]
-  pull_request:
-    paths:
-      - "android/**"
-      - ".github/workflows/android-ffmpeg-ci.yml"
   workflow_dispatch:
+
+concurrency:
+  group: lumation-android-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:

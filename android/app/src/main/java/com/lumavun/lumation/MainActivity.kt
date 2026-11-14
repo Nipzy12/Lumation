@@ -54,6 +54,9 @@ class MainActivity : Activity() {
     private lateinit var timeline: TimelineView
     private lateinit var motionController: MotionLayerController
     private lateinit var exportProgress: ProgressBar
+    private lateinit var saveProjectButton: Button
+    private lateinit var loadProjectButton: Button
+    private lateinit var projectStore: ProjectStore
 
     private val handler = Handler(Looper.getMainLooper())
     private var source: File? = null
@@ -95,6 +98,7 @@ class MainActivity : Activity() {
         window.statusBarColor = android.graphics.Color.parseColor("#0C0E19")
         window.navigationBarColor = android.graphics.Color.parseColor("#0C0E19")
         setContentView(R.layout.activity_main)
+        projectStore = ProjectStore(File(filesDir, "projects"))
 
         preview = findViewById(R.id.videoPreview)
         emptyPreview = findViewById(R.id.emptyPreview)
@@ -115,12 +119,16 @@ class MainActivity : Activity() {
         endSeek = findViewById(R.id.endSeek)
         timeline = findViewById(R.id.timeline)
         exportProgress = findViewById(R.id.exportProgress)
+        saveProjectButton = findViewById(R.id.saveProjectButton)
+        loadProjectButton = findViewById(R.id.loadProjectButton)
         motionController = MotionLayerController(
             this, findViewById(R.id.motionPreview), timeline,
             pickImage = { openImagePicker() },
             onMessage = { message -> status.text = message }
         )
 
+        saveProjectButton.setOnClickListener { saveCurrentProject() }
+        loadProjectButton.setOnClickListener { openSavedProject() }
         importButton.setOnClickListener { openGallery() }
         audioImportButton.setOnClickListener { openAudioPicker() }
         audioRemoveButton.setOnClickListener { clearSoundtrack() }
@@ -473,6 +481,147 @@ class MainActivity : Activity() {
         }
     }
 
+
+    /**
+     * Persist one named default project slot. Source media is copied by ProjectStore
+     * so editing another project won't invalidate a saved snapshot.
+     */
+    private fun saveCurrentProject() {
+        if (busy) return
+        val clip = source ?: run {
+            status.text = "Tambahkan video terlebih dahulu."
+            return
+        }
+        val document = ProjectDocument(
+            video = clip,
+            videoName = fileName.text.toString(),
+            audio = soundtrack,
+            audioName = soundtrackName ?: "",
+            volume = audioVolumeSeek.progress,
+            durationMs = durationMs,
+            trimStartMs = trimStartMs,
+            trimEndMs = trimEndMs,
+            sourceHasAudio = sourceHasAudio,
+            layers = motionController.snapshot()
+        )
+        setBusy(true, "Menyimpan project dan menyalin media lokal...")
+        Thread {
+            try {
+                projectStore.save(document)
+                runOnUiThread {
+                    setBusy(false, "Project tersimpan. Tombol Open Project dapat memulihkannya.")
+                }
+            } catch (e: Exception) {
+                runOnUiThread { setBusy(false, "Gagal menyimpan project: ${e.message}") }
+            }
+        }.start()
+    }
+
+    /**
+     * Projects contain separate private copies of media. Copy them again into
+     * working imports before restoring: delete/replace commands must not touch
+     * the saved project's master files.
+     */
+    private fun openSavedProject() {
+        if (busy) return
+        setBusy(true, "Membuka project dan menyiapkan media...")
+        Thread {
+            val copiedFiles = mutableListOf<File>()
+            var newAudioPlayer: MediaPlayer? = null
+            try {
+                val project = projectStore.load()
+                    ?: throw IllegalStateException("Belum ada project tersimpan")
+                val directory = File(filesDir, "imports").apply { mkdirs() }
+
+                fun workingCopy(original: File?): File? {
+                    if (original == null) return null
+                    val safeName = original.name.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                    val target = File(
+                        directory, "restored-${java.util.UUID.randomUUID()}-$safeName"
+                    )
+                    original.copyTo(target)
+                    copiedFiles.add(target)
+                    return target
+                }
+
+                val videoCopy = requireNotNull(workingCopy(project.video))
+                val audioCopy = workingCopy(project.audio)
+                val imageCopy = workingCopy(project.layers.imageFile)
+                if (audioCopy != null) {
+                    newAudioPlayer = MediaPlayer().apply {
+                        setDataSource(audioCopy.absolutePath)
+                        isLooping = true
+                        prepare()
+                    }
+                }
+                val loaded = project.copy(
+                    video = videoCopy,
+                    audio = audioCopy,
+                    layers = project.layers.copy(imageFile = imageCopy)
+                )
+                val preparedPlayer = newAudioPlayer
+                runOnUiThread {
+                    try {
+                        pauseSoundtrack()
+                        soundtrackPlayer?.release()
+                        preview.stopPlayback()
+                        val previousVideo = source
+                        val previousAudio = soundtrack
+
+                        // Restore visual-layer assets before the new media is assigned.
+                        motionController.restore(loaded.layers)
+                        source = loaded.video
+                        soundtrack = loaded.audio
+                        soundtrackPlayer = preparedPlayer
+                        soundtrackDurationMs = preparedPlayer?.duration?.toLong() ?: 0L
+                        soundtrackName = loaded.audioName.takeIf { loaded.audio != null }
+                        sourceHasAudio = loaded.sourceHasAudio
+                        durationMs = loaded.durationMs
+                        trimStartMs = loaded.trimStartMs
+                        trimEndMs = loaded.trimEndMs
+
+                        timeline.durationMs = durationMs
+                        timeline.trimStartMs = trimStartMs
+                        timeline.trimEndMs = trimEndMs
+                        timeline.cursorMs = trimStartMs
+                        timeline.clipName = loaded.videoName
+                        fileName.text = loaded.videoName
+                        audioFileName.text = if (loaded.audio != null) {
+                            "♫ ${loaded.audioName}"
+                        } else {
+                            "Audio track belum ditambahkan"
+                        }
+                        timeline.musicTrackName = loaded.audioName.takeIf { loaded.audio != null }
+                        audioVolumeSeek.progress = loaded.volume
+                        startSeek.progress = (loaded.trimStartMs * 1000L / durationMs)
+                            .toInt().coerceIn(0, 1000)
+                        endSeek.progress = (loaded.trimEndMs * 1000L / durationMs)
+                            .toInt().coerceIn(0, 1000)
+                        startLabel.text = "Mulai: ${clock(trimStartMs)}"
+                        endLabel.text = "Selesai: ${clock(trimEndMs)}"
+                        timeLabel.text = "${clock(trimStartMs)} / ${clock(durationMs)}"
+                        motionController.updatePlayback(trimStartMs, trimStartMs, trimEndMs)
+                        emptyPreview.visibility = View.GONE
+                        playbackReady = false
+                        preview.setVideoPath(loaded.video.absolutePath)
+                        preview.seekTo(trimStartMs.toInt())
+                        previousVideo?.delete()
+                        previousAudio?.delete()
+                        setBusy(false, "Project dibuka dari penyimpanan lokal.")
+                    } catch (e: Exception) {
+                        preparedPlayer?.release()
+                        copiedFiles.forEach { it.delete() }
+                        setBusy(false, "Gagal memulihkan project: ${e.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                newAudioPlayer?.release()
+                copiedFiles.forEach { it.delete() }
+                runOnUiThread { setBusy(false, "Gagal membuka project: ${e.message}") }
+            }
+        }.start()
+    }
+
     private fun saveToGallery(file: File): Uri {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, "Lumation-${System.currentTimeMillis()}.mp4")
@@ -509,6 +658,8 @@ class MainActivity : Activity() {
         status.text = message
         exportProgress.visibility = if (value) View.VISIBLE else View.GONE
         importButton.isEnabled = !value
+        saveProjectButton.isEnabled = !value && source != null
+        loadProjectButton.isEnabled = !value
         audioImportButton.isEnabled = !value
         audioRemoveButton.isEnabled = !value && soundtrack != null
         audioVolumeSeek.isEnabled = !value && soundtrack != null

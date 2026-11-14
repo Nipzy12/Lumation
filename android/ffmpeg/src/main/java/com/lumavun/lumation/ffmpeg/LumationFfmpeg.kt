@@ -56,4 +56,54 @@ object LumationFfmpeg {
             }
         }
     }
+    /**
+     * Trim a local video and encode an MP4 without network access.
+     * Hardware H.264 is attempted first; MPEG-4 Part 2 is the compatibility fallback.
+     * The latter is NOT H.264, even though it is packaged in an MP4 container.
+     */
+    fun exportTrimmedMp4(
+        input: File,
+        output: File,
+        startMs: Long,
+        endMs: Long,
+        onComplete: (Result<File>) -> Unit
+    ) {
+        if (!input.isFile || startMs < 0L || endMs <= startMs) {
+            onComplete(Result.failure(IllegalArgumentException("Invalid input file or trim interval")))
+            return
+        }
+        if (input.canonicalPath == output.canonicalPath) {
+            onComplete(Result.failure(IllegalArgumentException("Input and output must differ")))
+            return
+        }
+        output.parentFile?.mkdirs()
+        val offset = String.format(java.util.Locale.US, "%.3f", startMs / 1000.0)
+        val seconds = String.format(java.util.Locale.US, "%.3f", (endMs - startMs) / 1000.0)
+
+        fun runEncoder(encoder: String) {
+            val args = arrayOf(
+                "-hide_banner", "-y", "-ss", offset,
+                "-i", input.absolutePath, "-t", seconds,
+                "-map", "0:v:0", "-map", "0:a:0?",
+                "-c:v", encoder, "-b:v", "4M", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "128k",
+                "-movflags", "+faststart", output.absolutePath
+            )
+            FFmpegKit.executeWithArgumentsAsync(args) { session ->
+                if (ReturnCode.isSuccess(session.returnCode) && output.isFile && output.length() > 0L) {
+                    onComplete(Result.success(output))
+                } else if (encoder == "h264_mediacodec") {
+                    output.delete()
+                    runEncoder("mpeg4")
+                } else {
+                    onComplete(Result.failure(IllegalStateException(
+                        "FFmpeg failed after hardware and software attempts (code: ${session.returnCode}). " +
+                            (session.failStackTrace ?: "Inspect FFmpeg logs.")
+                    )))
+                }
+            }
+        }
+        runEncoder("h264_mediacodec")
+    }
+
 }

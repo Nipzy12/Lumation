@@ -1,6 +1,7 @@
 package com.lumavun.lumation
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ContentValues
 import android.content.Intent
 import android.media.MediaMetadataRetriever
@@ -13,6 +14,7 @@ import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.view.View
 import android.widget.Button
+import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
@@ -56,7 +58,13 @@ class MainActivity : Activity() {
     private lateinit var exportProgress: ProgressBar
     private lateinit var saveProjectButton: Button
     private lateinit var loadProjectButton: Button
-    private lateinit var projectStore: ProjectStore
+    private lateinit var projectLibrary: ProjectLibrary
+    private lateinit var newProjectButton: Button
+    private lateinit var saveAsProjectButton: Button
+    private lateinit var deleteProjectButton: Button
+    private lateinit var projectNameLabel: TextView
+    private var currentProjectId: String? = null
+    private var currentProjectTitle: String = "Belum disimpan"
 
     private val handler = Handler(Looper.getMainLooper())
     private var source: File? = null
@@ -98,7 +106,7 @@ class MainActivity : Activity() {
         window.statusBarColor = android.graphics.Color.parseColor("#0C0E19")
         window.navigationBarColor = android.graphics.Color.parseColor("#0C0E19")
         setContentView(R.layout.activity_main)
-        projectStore = ProjectStore(File(filesDir, "projects"))
+        projectLibrary = ProjectLibrary(File(filesDir, "projects"))
 
         preview = findViewById(R.id.videoPreview)
         emptyPreview = findViewById(R.id.emptyPreview)
@@ -121,14 +129,21 @@ class MainActivity : Activity() {
         exportProgress = findViewById(R.id.exportProgress)
         saveProjectButton = findViewById(R.id.saveProjectButton)
         loadProjectButton = findViewById(R.id.loadProjectButton)
+        newProjectButton = findViewById(R.id.newProjectButton)
+        saveAsProjectButton = findViewById(R.id.saveAsProjectButton)
+        deleteProjectButton = findViewById(R.id.deleteProjectButton)
+        projectNameLabel = findViewById(R.id.projectNameLabel)
         motionController = MotionLayerController(
             this, findViewById(R.id.motionPreview), timeline,
             pickImage = { openImagePicker() },
             onMessage = { message -> status.text = message }
         )
 
-        saveProjectButton.setOnClickListener { saveCurrentProject() }
-        loadProjectButton.setOnClickListener { openSavedProject() }
+        saveProjectButton.setOnClickListener { saveCurrentProject(asNew = false) }
+        saveAsProjectButton.setOnClickListener { saveCurrentProject(asNew = true) }
+        loadProjectButton.setOnClickListener { showProjectBrowser() }
+        newProjectButton.setOnClickListener { confirmNewProject() }
+        deleteProjectButton.setOnClickListener { confirmDeleteProject() }
         importButton.setOnClickListener { openGallery() }
         audioImportButton.setOnClickListener { openAudioPicker() }
         audioRemoveButton.setOnClickListener { clearSoundtrack() }
@@ -659,7 +674,10 @@ class MainActivity : Activity() {
         exportProgress.visibility = if (value) View.VISIBLE else View.GONE
         importButton.isEnabled = !value
         saveProjectButton.isEnabled = !value && source != null
+        saveAsProjectButton.isEnabled = !value && source != null
         loadProjectButton.isEnabled = !value
+        newProjectButton.isEnabled = !value
+        deleteProjectButton.isEnabled = !value && currentProjectId != null
         audioImportButton.isEnabled = !value
         audioRemoveButton.isEnabled = !value && soundtrack != null
         audioVolumeSeek.isEnabled = !value && soundtrack != null

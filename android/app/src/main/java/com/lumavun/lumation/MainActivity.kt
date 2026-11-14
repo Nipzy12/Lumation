@@ -501,12 +501,44 @@ class MainActivity : Activity() {
      * Persist one named default project slot. Source media is copied by ProjectStore
      * so editing another project won't invalidate a saved snapshot.
      */
-    private fun saveCurrentProject() {
+    /** Save updates the selected project; Save As always creates an independent copy. */
+    private fun saveCurrentProject(asNew: Boolean) {
         if (busy) return
-        val clip = source ?: run {
-            status.text = "Tambahkan video terlebih dahulu."
+        if (source == null) {
+            status.text = "Impor video sebelum menyimpan proyek."
             return
         }
+        val oldId = if (asNew) null else currentProjectId
+        if (oldId != null) {
+            persistCurrentProject(currentProjectTitle, oldId)
+            return
+        }
+        val input = EditText(this).apply {
+            setSingleLine(true)
+            setText(
+                if (asNew && currentProjectId != null) "$currentProjectTitle - Copy"
+                else fileName.text.toString().substringBeforeLast(".").take(40)
+            )
+            selectAll()
+            setPadding(32, 12, 32, 12)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(if (asNew) "Save As, proyek baru" else "Nama proyek baru")
+            .setView(input)
+            .setNegativeButton("Batal", null)
+            .setPositiveButton("Simpan") { _, _ ->
+                val name = input.text.toString().trim().take(64)
+                if (name.isBlank()) {
+                    status.text = "Nama proyek tidak boleh kosong."
+                } else {
+                    persistCurrentProject(name, null)
+                }
+            }
+            .show()
+    }
+
+    private fun persistCurrentProject(title: String, id: String?) {
+        val clip = source ?: return
         val document = ProjectDocument(
             video = clip,
             videoName = fileName.text.toString(),
@@ -519,12 +551,15 @@ class MainActivity : Activity() {
             sourceHasAudio = sourceHasAudio,
             layers = motionController.snapshot()
         )
-        setBusy(true, "Menyimpan project dan menyalin media lokal...")
+        setBusy(true, "Menyimpan $title dan menyalin media lokal...")
         Thread {
             try {
-                projectStore.save(document)
+                val entry = projectLibrary.save(document, title, id)
                 runOnUiThread {
-                    setBusy(false, "Project tersimpan. Tombol Open Project dapat memulihkannya.")
+                    currentProjectId = entry.id
+                    currentProjectTitle = entry.title
+                    projectNameLabel.text = "Project: ${entry.title}"
+                    setBusy(false, "Project ${entry.title} tersimpan.")
                 }
             } catch (e: Exception) {
                 runOnUiThread { setBusy(false, "Gagal menyimpan project: ${e.message}") }
@@ -532,20 +567,138 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    private fun showProjectBrowser() {
+        if (busy) return
+        setBusy(true, "Memuat daftar proyek...")
+        Thread {
+            try {
+                val projects = projectLibrary.list()
+                runOnUiThread {
+                    setBusy(false, if (projects.isEmpty()) "Belum ada proyek tersimpan."
+                        else "${projects.size} proyek tersedia.")
+                    if (projects.isEmpty()) return@runOnUiThread
+                    val names = projects.map { entry ->
+                        if (entry.id == currentProjectId) "● ${entry.title}"
+                        else entry.title
+                    }.toTypedArray()
+                    AlertDialog.Builder(this)
+                        .setTitle("Project Library (${projects.size})")
+                        .setItems(names) { _, index ->
+                            val entry = projects[index]
+                            if (entry.id == currentProjectId) {
+                                status.text = "Proyek ${entry.title} sudah terbuka."
+                            } else {
+                                AlertDialog.Builder(this)
+                                    .setTitle("Buka proyek?")
+                                    .setMessage("Perubahan yang belum disimpan akan hilang.")
+                                    .setNegativeButton("Batal", null)
+                                    .setPositiveButton("Buka") { _, _ ->
+                                        openSavedProject(entry.id, entry.title)
+                                    }.show()
+                            }
+                        }
+                        .setNegativeButton("Tutup", null)
+                        .show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { setBusy(false, "Gagal memuat proyek: ${e.message}") }
+            }
+        }.start()
+    }
+
+    private fun confirmNewProject() {
+        if (busy) return
+        AlertDialog.Builder(this)
+            .setTitle("New Project")
+            .setMessage("Reset editor? Perubahan yang belum disimpan akan hilang. Proyek yang sudah disimpan tetap aman.")
+            .setNegativeButton("Batal", null)
+            .setPositiveButton("Buat baru") { _, _ -> resetCurrentEditor() }
+            .show()
+    }
+
+    private fun resetCurrentEditor() {
+        pauseSoundtrack()
+        soundtrackPlayer?.release()
+        soundtrackPlayer = null
+        preview.stopPlayback()
+        source?.delete()
+        soundtrack?.delete()
+        source = null
+        soundtrack = null
+        soundtrackName = null
+        soundtrackDurationMs = 0L
+        sourceHasAudio = false
+        durationMs = 0L
+        trimStartMs = 0L
+        trimEndMs = 0L
+        playbackReady = false
+        currentProjectId = null
+        currentProjectTitle = "Belum disimpan"
+        projectNameLabel.text = "Project: Belum disimpan"
+        fileName.text = "Belum ada klip"
+        audioFileName.text = "Audio track belum ditambahkan"
+        timeline.durationMs = 0L
+        timeline.cursorMs = 0L
+        timeline.trimStartMs = 0L
+        timeline.trimEndMs = 0L
+        timeline.clipName = "VIDEO"
+        timeline.musicTrackName = null
+        motionController.restore(MotionProjectState())
+        audioVolumeSeek.progress = 60
+        startSeek.progress = 0
+        endSeek.progress = 1000
+        timeLabel.text = "00:00.0 / 00:00.0"
+        startLabel.text = "Mulai: 00:00.0"
+        endLabel.text = "Selesai: 00:00.0"
+        emptyPreview.visibility = View.VISIBLE
+        playButton.text = "▶ Play"
+        setBusy(false, "Project baru siap. Impor video untuk mulai mengedit.")
+    }
+
+    private fun confirmDeleteProject() {
+        val id = currentProjectId ?: return
+        if (busy) return
+        AlertDialog.Builder(this)
+            .setTitle("Hapus proyek tersimpan?")
+            .setMessage("Hapus '$currentProjectTitle' beserta salinan media proyek? Editor saat ini tetap terbuka.")
+            .setNegativeButton("Batal", null)
+            .setPositiveButton("Hapus") { _, _ ->
+                setBusy(true, "Menghapus proyek tersimpan...")
+                Thread {
+                    try {
+                        val deleted = projectLibrary.delete(id)
+                        runOnUiThread {
+                            if (deleted) {
+                                currentProjectId = null
+                                currentProjectTitle = "Belum disimpan"
+                                projectNameLabel.text = "Project: Belum disimpan"
+                            }
+                            setBusy(false, if (deleted)
+                                "Project dihapus dari library. Editor saat ini belum disimpan."
+                                else "Project tidak ditemukan.")
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread { setBusy(false, "Gagal menghapus proyek: ${e.message}") }
+                    }
+                }.start()
+            }
+            .show()
+    }
+
     /**
      * Projects contain separate private copies of media. Copy them again into
      * working imports before restoring: delete/replace commands must not touch
      * the saved project's master files.
      */
-    private fun openSavedProject() {
+    private fun openSavedProject(projectId: String, projectTitle: String) {
         if (busy) return
         setBusy(true, "Membuka project dan menyiapkan media...")
         Thread {
             val copiedFiles = mutableListOf<File>()
             var newAudioPlayer: MediaPlayer? = null
             try {
-                val project = projectStore.load()
-                    ?: throw IllegalStateException("Belum ada project tersimpan")
+                val project = projectLibrary.load(projectId)
+                    ?: throw IllegalStateException("Proyek tidak ditemukan di library")
                 val directory = File(filesDir, "imports").apply { mkdirs() }
 
                 fun workingCopy(original: File?): File? {
@@ -622,7 +775,10 @@ class MainActivity : Activity() {
                         preview.seekTo(trimStartMs.toInt())
                         previousVideo?.delete()
                         previousAudio?.delete()
-                        setBusy(false, "Project dibuka dari penyimpanan lokal.")
+                        currentProjectId = projectId
+                        currentProjectTitle = projectTitle
+                        projectNameLabel.text = "Project: $projectTitle"
+                        setBusy(false, "Project $projectTitle dibuka dari library.")
                     } catch (e: Exception) {
                         preparedPlayer?.release()
                         copiedFiles.forEach { it.delete() }

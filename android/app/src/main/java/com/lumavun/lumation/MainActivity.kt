@@ -34,6 +34,7 @@ class MainActivity : Activity() {
         private const val REQUEST_VIDEO = 201
         private const val REQUEST_AUDIO = 202
         private const val REQUEST_IMAGE = 203
+        private const val REQUEST_GGUF = 204
     }
 
     private lateinit var preview: VideoView
@@ -55,6 +56,7 @@ class MainActivity : Activity() {
     private lateinit var endSeek: SeekBar
     private lateinit var timeline: TimelineView
     private lateinit var motionController: MotionLayerController
+    private lateinit var aiController: LocalAiController
     private lateinit var exportProgress: ProgressBar
     private lateinit var saveProjectButton: Button
     private lateinit var loadProjectButton: Button
@@ -137,6 +139,12 @@ class MainActivity : Activity() {
             this, findViewById(R.id.motionPreview), timeline,
             pickImage = { openImagePicker() },
             onMessage = { message -> status.text = message }
+        )
+        aiController = LocalAiController(
+            this,
+            selectDocument = { openGgufPicker() },
+            setEditingBusy = { value, message -> setBusy(value, message) },
+            isEditingBusy = { busy }
         )
 
         saveProjectButton.setOnClickListener { saveCurrentProject(asNew = false) }
@@ -227,6 +235,15 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun openGgufPicker() {
+        if (busy) return
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        startActivityForResult(intent, REQUEST_GGUF)
+    }
+
     private fun openImagePicker() {
         if (busy) return
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -261,6 +278,7 @@ class MainActivity : Activity() {
             if (requestCode == REQUEST_VIDEO) data?.data?.let(::importVideo)
             if (requestCode == REQUEST_AUDIO) data?.data?.let(::importAudio)
             if (requestCode == REQUEST_IMAGE) data?.data?.let(motionController::importImage)
+            if (requestCode == REQUEST_GGUF) data?.data?.let(aiController::onDocumentSelected)
         }
     }
 
@@ -842,6 +860,7 @@ class MainActivity : Activity() {
         startSeek.isEnabled = !value
         endSeek.isEnabled = !value
         if (::motionController.isInitialized) motionController.setBusy(value)
+        if (::aiController.isInitialized) aiController.syncBusy(value)
     }
 
     private fun clock(ms: Long): String {

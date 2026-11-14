@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="lumation_background">#0C0E19</color>
+    <color name="lumation_surface">#171928</color>
+    <color name="lumation_accent">#9E86FF</color>
+    <color name="lumation_text">#F8F7FF</color>
+    <color name="lumation_muted">#A0A1B7</color>
+</resources>
